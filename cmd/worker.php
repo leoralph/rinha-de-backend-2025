@@ -12,11 +12,9 @@ function sendPaymentRequest($processor, $body): bool
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
-    $response = curl_exec($ch);
+    curl_exec($ch);
     $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-
-    echo "Resposta do processador '{$processor}': {$response}\n";
 
     return $httpCode >= 200 && $httpCode < 300;
 }
@@ -77,13 +75,11 @@ while (true) {
         }
 
         $statuses = getProcessorStatuses($redis);
-        $initialProcessor = 'default';
-        if (
-            $statuses['default']['failing']
+
+        $processor = $statuses['default']['failing']
             || $statuses['default']['minResponseTime'] > $statuses['fallback']['minResponseTime'] * 3
-        ) {
-            $initialProcessor = 'fallback';
-        }
+            ? 'fallback'
+            : 'default';
 
         $preciseTimestamp = microtime(true);
         $date = DateTime::createFromFormat('U.u', sprintf('%.6f', $preciseTimestamp));
@@ -92,18 +88,14 @@ while (true) {
         $body = [
             'amount' => $payload['amount'],
             'correlationId' => $correlationId,
-            'requestedAt' => $requestedAtString, // Envia a string de alta precisão
+            'requestedAt' => $requestedAtString,
         ];
 
-        $success = sendPaymentRequest($initialProcessor, $body);
-        $finalProcessor = $initialProcessor;
+        $success = sendPaymentRequest($processor, $body);
 
         if (!$success) {
-            $fallbackProcessor = ($initialProcessor === 'default') ? 'fallback' : 'default';
-            $success = sendPaymentRequest($fallbackProcessor, $body);
-            if ($success) {
-                $finalProcessor = $fallbackProcessor;
-            }
+            $processor = ($processor === 'default') ? 'fallback' : 'default';
+            $success = sendPaymentRequest($processor, $body);
         }
 
         if (!$success) {
@@ -114,12 +106,11 @@ while (true) {
         $redis->setex($correlationId, 86400, 1);
 
         $redis->zAdd(
-            'payments:' . $finalProcessor,
-            $preciseTimestamp, // << USA O FLOAT PRECISO
+            'payments:' . $processor,
+            $preciseTimestamp,
             $correlationId . ':' . $payload['amount'] * 100
         );
     } catch (\RedisException $e) {
-        echo "Redis connection error: " . $e->getMessage() . "\n";
         $redis = new Redis();
         $redis->pconnect('redis', 6379);
     }

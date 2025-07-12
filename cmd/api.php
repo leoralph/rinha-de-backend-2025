@@ -8,14 +8,10 @@ $redis->pconnect('redis', 6379);
 $routes = [
     'GET' => [
         '/payments-summary' => static function () use ($redis) {
-            /**
-             * Função auxiliar para converter uma string de data ISO 8601 para um timestamp float.
-             */
             $toFloatTimestamp = function (?string $dateString): ?float {
                 if (!$dateString) {
                     return null;
                 }
-                // Trata formatos com e sem milissegundos
                 $date = DateTime::createFromFormat('Y-m-d\TH:i:s.u\Z', $dateString) ?: DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $dateString);
 
                 if (!$date) {
@@ -25,7 +21,6 @@ $routes = [
                 return (float) $date->format('U.u');
             };
 
-            // Usa a nova função para converter os parâmetros GET
             $from = $toFloatTimestamp($_GET['from'] ?? null) ?? '-inf';
             $to = $toFloatTimestamp($_GET['to'] ?? null) ?? '+inf';
 
@@ -47,7 +42,7 @@ $routes = [
                 ];
             }
 
-            echo json_encode($summary);
+            return $summary;
         },
     ],
     'POST' => [
@@ -58,7 +53,7 @@ $routes = [
                 !isset($_REQUEST['correlationId'])
                 || !isset($_REQUEST['amount'])
             ) {
-                http_response_code(400); // Bad Request
+                http_response_code(400);
                 return;
             }
 
