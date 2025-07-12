@@ -1,0 +1,40 @@
+services:
+  caddy:
+    image: caddy:latest
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "9999:9999"
+    volumes:
+      - ./server.conf:/etc/caddy/Caddyfile
+    networks:
+      - backend
+
+  api01:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: leoralph/rinha-de-backend-2025-franken
+    networks:
+      - backend
+      - payment-processor
+
+  api02:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: leoralph/rinha-de-backend-2025-franken
+    networks:
+      - backend
+      - payment-processor
+
+  redis:
+    image: redis:latest
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+  payment-processor:
+    external: true

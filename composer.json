@@ -1,0 +1,16 @@
+{
+    "name": "leoralph/rinha-de-backend-2025-franken",
+    "type": "project",
+    "autoload": {
+        "psr-4": {
+            "LeoRalph\\Rinha\\": "app/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Leonardo Ralph",
+            "email": "theleoralph@gmail.com"
+        }
+    ],
+    "require": {}
+}

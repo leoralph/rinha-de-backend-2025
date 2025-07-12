@@ -1,0 +1,12 @@
+FROM dunglas/frankenphp:1.8-php8.4-alpine
+
+WORKDIR /srv
+
+RUN apk add --no-cache autoconf build-base \
+    && pecl install redis \
+    && docker-php-ext-enable redis
+
+COPY . /srv/
+
+ENV FRANKENPHP_CONFIG="worker /srv/public/index.php"
+ENV SERVER_NAME=":80"
