@@ -1,37 +1,73 @@
+x-service-templates:
+  api: &api
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: leoralph/rinha-de-backend-2025-franken
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: "90M"
+
 services:
   caddy:
     image: caddy:latest
-    container_name: caddy
-    restart: unless-stopped
     ports:
       - "9999:9999"
     volumes:
-      - ./server.conf:/etc/caddy/Caddyfile
+      - ./Caddyfile:/etc/caddy/Caddyfile
     networks:
       - backend
-
-  api01:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: leoralph/rinha-de-backend-2025-franken
-    networks:
-      - backend
-      - payment-processor
-
-  api02:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: leoralph/rinha-de-backend-2025-franken
-    networks:
-      - backend
-      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: "50M"
 
   redis:
     image: redis:latest
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.15"
+          memory: "40M"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: leoralph/rinha-de-backend-2025-worker
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.6"
+          memory: "80M"
+
+  api01:
+    <<: *api
+
+  api02:
+    <<: *api
 
 networks:
   backend:
