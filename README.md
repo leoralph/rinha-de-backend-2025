@@ -16,28 +16,32 @@ A Rinha de Backend é uma competição que desafia desenvolvedores a criar backe
 
 ## 🏗️ Arquitetura Simples
 
-Este projeto foi desenvolvido com uma **arquitetura minimalista** para fins de desenvolvimento rápido e prototipagem. A aplicação está concentrada em apenas **dois arquivos PHP**:
+Este projeto foi desenvolvido com uma **arquitetura minimalista** para fins de desenvolvimento rápido e prototipagem. A aplicação está concentrada em apenas **três arquivos PHP**:
 
 ### Componentes Principais
 
 1. **API Gateway** (`cmd/api.php`) - Servidor web que expõe os endpoints
-2. **Worker** (`cmd/worker.php`) - Processador assíncrono de pagamentos
-3. **Redis** - Cache e fila de jobs
-4. **Caddy** - Load balancer para distribuir requisições
+2. **Payment Worker** (`cmd/payment-worker.php`) - Processador assíncrono de pagamentos
+3. **Health Worker** (`cmd/health-worker.php`) - Monitor de saúde dos processadores
+4. **Redis** - Cache e fila de jobs
+5. **Nginx** - Load balancer para distribuir requisições
 
 ### Arquitetura Física
 
 ```
-Cliente -> Caddy (Load Balancer) -> API Instances (api01, api02)
+Cliente -> Nginx (Load Balancer) -> API Instances (api01, api02)
                                          |
                                          v
                                      Redis Queue
                                          |
                                          v
-                                     Worker Process
+                              Payment Worker Process
                                          |
                                          v
                               Payment Processors (Default/Fallback)
+                                         ^
+                                         |
+                              Health Worker (Monitor)
 ```
 
 ### Endpoints Disponíveis
@@ -101,8 +105,11 @@ curl -X POST http://localhost:9999/payments \
 # Logs da API
 docker-compose logs -f api01 api02
 
-# Logs do Worker
-docker-compose logs -f worker
+# Logs do Payment Worker
+docker-compose logs -f payment-worker
+
+# Logs do Health Worker
+docker-compose logs -f health-worker
 
 # Logs do Redis
 docker-compose logs -f redis
@@ -113,7 +120,7 @@ docker-compose logs -f redis
 - **FrankenPHP** - Runtime PHP de alta performance
 - **PHP 8.4** - Linguagem principal
 - **Redis** - Cache e sistema de filas
-- **Caddy** - Load balancer e proxy reverso
+- **Nginx** - Load balancer e proxy reverso
 - **Docker** - Containerização
 
 ## 📊 Recursos e Limitações
@@ -127,28 +134,37 @@ Conforme as regras da Rinha de Backend 2025:
 ### Distribuição de Recursos
 
 - **API (2 instâncias):** 0.3 CPU / 90MB cada
-- **Worker:** 0.6 CPU / 80MB
-- **Caddy:** 0.15 CPU / 50MB
-- **Redis:** 0.15 CPU / 40MB
+- **Payment Worker:** 0.5 CPU / 60MB
+- **Health Worker:** 0.1 CPU / 20MB
+- **Nginx:** 0.1 CPU / 30MB
+- **Redis:** 0.2 CPU / 60MB
 
 ## 🎲 Estratégia de Negócio
 
-O worker implementa uma estratégia inteligente para escolha do processador:
+O sistema implementa uma arquitetura com workers especializados:
 
-1. **Verificação de Saúde:** Consulta health-check dos processadores (cache de 5s)
+### Health Worker
+
+- **Monitoramento Contínuo:** Verifica health-check dos processadores a cada 5 segundos
+- **Cache Inteligente:** Armazena status no Redis para acesso rápido
+- **Detecção de Falhas:** Monitora disponibilidade e tempo de resposta
+
+### Payment Worker
+
+1. **Verificação de Saúde:** Consulta cache de status atualizado pelo Health Worker
 2. **Seleção Inteligente:**
    - Usa processador padrão se estável
    - Alterna para fallback se padrão estiver falhando
-   - Considera tempo de resposta na decisão
+   - Considera tempo de resposta na decisão (máximo 3x mais lento)
 3. **Retry Automático:** Tenta processador alternativo em caso de falha
-4. **Prevenção de Duplicatas:** Evita reprocessamento usando correlationId
-
-## 📈 Performance
+4. **Prevenção de Duplicatas:** Evita reprocessamento usando correlationId## 📈 Performance
 
 - **Processamento Assíncrono:** Desacopla recebimento de processamento
 - **Cache Inteligente:** Health-check cacheado para reduzir overhead
 - **Múltiplas Instâncias:** Load balancing entre APIs
 - **Workers Dedicados:** Processamento otimizado em background
+- **Scripts Lua:** Otimização Redis com script Lua para summaries
+- **Conexões Persistentes:** Reutilização de conexões curl e Redis
 
 ## 🔍 Desenvolvimento e Debug
 

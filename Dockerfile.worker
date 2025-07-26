@@ -6,8 +6,10 @@ RUN apk add --no-cache autoconf build-base \
     && pecl install redis \
     && docker-php-ext-enable redis
 
-COPY ./cmd/worker.php /srv/worker.php
+COPY ./cmd/*-worker.php /srv
 
 HEALTHCHECK NONE
 
-ENTRYPOINT ["php", "/srv/worker.php"]
+ENV WORKER_TYPE=payment
+
+ENTRYPOINT ["sh", "-c", "php /srv/${WORKER_TYPE}-worker.php"]

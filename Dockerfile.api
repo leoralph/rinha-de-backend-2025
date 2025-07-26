@@ -8,5 +8,5 @@ RUN apk add --no-cache autoconf build-base \
 
 COPY ./cmd/api.php /srv/public/index.php
 
-ENV FRANKENPHP_CONFIG="worker /srv/public/index.php"
+ENV FRANKENPHP_CONFIG="worker /srv/public/index.php 16"
 ENV SERVER_NAME=":80"

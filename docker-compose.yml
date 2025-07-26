@@ -3,7 +3,7 @@ x-service-templates:
     build:
       context: .
       dockerfile: Dockerfile.api
-    image: leoralph/rinha-de-backend-2025-franken
+    image: leoralph/rinha-de-backend-2025-api
     depends_on:
       redis:
         condition: service_healthy
@@ -17,19 +17,22 @@ x-service-templates:
           memory: "90M"
 
 services:
-  caddy:
-    image: caddy:latest
+  nginx:
+    image: nginx:latest
     ports:
       - "9999:9999"
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
+      - ./nginx.conf:/etc/nginx/nginx.conf
     networks:
       - backend
+    depends_on:
+      - api01
+      - api02
     deploy:
       resources:
         limits:
-          cpus: "0.15"
-          memory: "50M"
+          cpus: "0.1"
+          memory: "30M"
 
   redis:
     image: redis:latest
@@ -43,14 +46,16 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.15"
-          memory: "40M"
+          cpus: "0.2"
+          memory: "60M"
 
-  worker:
+  payment-worker:
     build:
       context: .
       dockerfile: Dockerfile.worker
     image: leoralph/rinha-de-backend-2025-worker
+    environment:
+      - WORKER_TYPE=payment
     depends_on:
       redis:
         condition: service_healthy
@@ -60,8 +65,27 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.6"
-          memory: "80M"
+          cpus: "0.5"
+          memory: "60M"
+
+  health-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    image: leoralph/rinha-de-backend-2025-worker
+    environment:
+      - WORKER_TYPE=health
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - payment-processor
+    deploy:
+      resources:
+        limits:
+          cpus: "0.1"
+          memory: "20M"
 
   api01:
     <<: *api

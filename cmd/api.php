@@ -5,9 +5,25 @@ ignore_user_abort(true);
 $redis = new Redis();
 $redis->pconnect('redis', 6379);
 
+$luaScript = <<<LUA
+local members = redis.call('zrangebyscore', KEYS[1], ARGV[1], ARGV[2]);
+local totalAmount = 0;
+local totalRequests = #members;
+for i, member in ipairs(members) do
+  local pos = string.find(member, ':', 1, true);
+  if pos then
+    totalAmount = totalAmount + tonumber(string.sub(member, pos + 1));
+  end
+end
+return {totalRequests, totalAmount};
+LUA;
+
+$summaryScriptSha = $redis->script('load', $luaScript);
+
+
 $routes = [
     'GET' => [
-        '/payments-summary' => static function () use ($redis) {
+        '/payments-summary' => static function () use ($redis, $summaryScriptSha) {
             $toFloatTimestamp = function (?string $dateString): ?float {
                 if (!$dateString) {
                     return null;
@@ -28,17 +44,12 @@ $routes = [
 
             foreach (['default', 'fallback'] as $processor) {
                 $cacheKey = "payments:{$processor}";
-                $results = $redis->zRangeByScore($cacheKey, $from, $to);
 
-                $totalAmountInCents = 0;
-                foreach ($results as $member) {
-                    $amountPart = substr($member, strpos($member, ':') + 1);
-                    $totalAmountInCents += (int) $amountPart;
-                }
+                $result = $redis->evalSha($summaryScriptSha, [$cacheKey, $from, $to], 1);
 
                 $summary[$processor] = [
-                    'totalRequests' => count($results),
-                    'totalAmount' => round($totalAmountInCents / 100, 2)
+                    'totalRequests' => (int) ($result[0] ?? 0),
+                    'totalAmount' => round(($result[1] ?? 0) / 100, 2)
                 ];
             }
 
@@ -47,19 +58,16 @@ $routes = [
     ],
     'POST' => [
         '/payments' => static function () use ($redis) {
-            $_REQUEST = json_decode(file_get_contents('php://input'), true);
+            $input = json_decode(file_get_contents('php://input'), true);
 
-            if (
-                !isset($_REQUEST['correlationId'])
-                || !isset($_REQUEST['amount'])
-            ) {
+            if (!isset($input['correlationId'], $input['amount'])) {
                 http_response_code(400);
                 return;
             }
 
             $redis->lPush('payment_jobs', json_encode([
-                'correlationId' => $_REQUEST['correlationId'],
-                'amount' => (float) $_REQUEST['amount'],
+                'correlationId' => $input['correlationId'],
+                'amountInCents' => (int) round($input['amount'] * 100),
             ]));
         },
         '/purge-payments' => static function () use ($redis) {
@@ -70,30 +78,27 @@ $routes = [
 
 
 $handler = static function () use ($routes) {
+    $method = $_SERVER['REQUEST_METHOD'];
     $uri = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 
-    if (
-        !isset($routes[$_SERVER['REQUEST_METHOD']])
-        || !isset($routes[$_SERVER['REQUEST_METHOD']][$uri])
-    ) {
+    $routeHandler = $routes[$method][$uri] ?? null;
+
+    if ($routeHandler === null) {
         http_response_code(404);
         return;
     }
 
-    header('Content-Type: application/json');
+    $response = $routeHandler();
 
-    if (!$response = $routes[$_SERVER['REQUEST_METHOD']][$uri]()) {
+    if ($response === null) {
         return;
     }
 
+    header('Content-Type: application/json; charset=utf-8');
     echo json_encode($response);
 };
 
-while (true) {
-    $keepRunning = \frankenphp_handle_request($handler);
 
+while (\frankenphp_handle_request($handler)) {
     gc_collect_cycles();
-
-    if (!$keepRunning)
-        break;
 }
