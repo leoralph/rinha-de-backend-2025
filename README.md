@@ -133,11 +133,11 @@ Conforme as regras da Rinha de Backend 2025:
 
 ### Distribuição de Recursos
 
-- **API (2 instâncias):** 0.3 CPU / 90MB cada
-- **Payment Worker:** 0.5 CPU / 60MB
-- **Health Worker:** 0.1 CPU / 20MB
-- **Nginx:** 0.1 CPU / 30MB
-- **Redis:** 0.2 CPU / 60MB
+- **API (2 instâncias):** 0.245 CPU / 110MB cada
+- **Payment Worker:** 0.6 CPU / 15MB
+- **Health Worker:** 0.01 CPU / 10MB
+- **Nginx:** 0.12 CPU / 50MB
+- **Redis:** 0.28 CPU / 55MB
 
 ## 🎲 Estratégia de Negócio
 
@@ -151,20 +151,26 @@ O sistema implementa uma arquitetura com workers especializados:
 
 ### Payment Worker
 
-1. **Verificação de Saúde:** Consulta cache de status atualizado pelo Health Worker
-2. **Seleção Inteligente:**
+1. **Múltiplos Processos:** Gerenciador que mantém 10 workers concorrentes para alta throughput
+2. **Verificação de Saúde:** Consulta cache de status atualizado pelo Health Worker
+3. **Seleção Inteligente:**
    - Usa processador padrão se estável
    - Alterna para fallback se padrão estiver falhando
    - Considera tempo de resposta na decisão (máximo 3x mais lento)
-3. **Retry Automático:** Tenta processador alternativo em caso de falha
-4. **Prevenção de Duplicatas:** Evita reprocessamento usando correlationId## 📈 Performance
+4. **Retry Automático:** Tenta processador alternativo em caso de falha
+5. **Prevenção de Duplicatas:** Evita reprocessamento usando correlationId
+6. **Auto-restart:** Workers reiniciam automaticamente em caso de falha
+
+## 📈 Performance
 
 - **Processamento Assíncrono:** Desacopla recebimento de processamento
 - **Cache Inteligente:** Health-check cacheado para reduzir overhead
 - **Múltiplas Instâncias:** Load balancing entre APIs
+- **Workers Concorrentes:** 10 processos paralelos para pagamentos
 - **Workers Dedicados:** Processamento otimizado em background
 - **Scripts Lua:** Otimização Redis com script Lua para summaries
 - **Conexões Persistentes:** Reutilização de conexões curl e Redis
+- **Memoria Otimizada:** Payment worker usa apenas 15MB para 10 processos
 
 ## 🔍 Desenvolvimento e Debug
 

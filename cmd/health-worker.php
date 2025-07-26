@@ -21,8 +21,6 @@ curl_multi_add_handle($multiHandler, $fallbackHealthCheck);
 
 while (true) {
     try {
-        echo "Checking processor statuses...\n";
-
         $running = null;
 
         do {
@@ -43,8 +41,6 @@ while (true) {
         $encodedResults = json_encode($results);
 
         $redis->set('gateway-statuses', $encodedResults);
-
-        echo "Gateway statuses updated in Redis: " . $encodedResults . "\n";
 
         sleep(5);
     } catch (\RedisException $e) {

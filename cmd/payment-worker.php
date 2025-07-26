@@ -1,15 +1,11 @@
 <?php
 
-$redis = new Redis();
-$redis->pconnect('redis', 6379);
+pcntl_async_signals(true);
 
-$paymentCurlHandle = curl_init();
+$numWorkers = (int) $_ENV['WORKER_COUNT'] ?? 1;
+$children = [];
 
-curl_setopt_array($paymentCurlHandle, [
-    CURLOPT_POST => true,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-]);
+echo "[Gerente] Iniciando o gerenciador de workers ($numWorkers).\n";
 
 function sendPaymentRequest($ch, $processor, $body): bool
 {
@@ -20,70 +16,138 @@ function sendPaymentRequest($ch, $processor, $body): bool
     return $httpCode >= 200 && $httpCode < 300;
 }
 
-echo "Payment Worker started. Listening for payment jobs...\n";
 
-while (true) {
-    try {
-        $job = $redis->brPop(['payment_jobs'], 0);
-        if (!$job || !isset($job[1]))
-            continue;
+function run_worker_logic()
+{
+    $redis = new Redis();
+    $redis->pconnect('redis', 6379);
 
-        $payload = json_decode($job[1], true);
-        $correlationId = $payload['correlationId'];
-        $amountInCents = $payload['amountInCents'];
+    $paymentCurlHandle = curl_init();
 
-        if ($redis->exists($correlationId)) {
-            continue;
-        }
+    curl_setopt_array($paymentCurlHandle, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+    ]);
 
-        $statusJson = $redis->get('gateway-statuses');
-        $statuses = $statusJson ? json_decode($statusJson, true) : null;
+    while (true) {
 
-        $processor = 'fallback';
+        try {
+            $job = $redis->brPop(['payment_jobs'], 0);
 
-        if ($statuses) {
-            $isDefaultFailing = $statuses['default']['failing'] ?? true;
-            $defaultTime = $statuses['default']['minResponseTime'] ?? 9999;
-            $fallbackTime = $statuses['fallback']['minResponseTime'] ?? 0;
+            if (!$job || !isset($job[1]))
+                continue;
 
-            if (!$isDefaultFailing && $defaultTime <= $fallbackTime * 3) {
-                $processor = 'default';
+            $payload = json_decode($job[1], true);
+            $correlationId = $payload['correlationId'];
+            $amountInCents = $payload['amountInCents'];
+
+            if ($redis->exists($correlationId)) {
+                continue;
             }
-        }
 
-        $preciseTimestamp = microtime(true);
-        $date = DateTime::createFromFormat('U.u', sprintf('%.6f', $preciseTimestamp));
-        $requestedAtString = $date->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s.v\Z');
+            $statusJson = $redis->get('gateway-statuses');
+            $statuses = $statusJson ? json_decode($statusJson, true) : null;
 
-        $body = [
-            'amount' => $amountInCents / 100,
-            'correlationId' => $correlationId,
-            'requestedAt' => $requestedAtString,
-        ];
+            $processor = 'fallback';
 
-        $success = sendPaymentRequest($paymentCurlHandle, $processor, $body);
+            if ($statuses) {
+                $isDefaultFailing = $statuses['default']['failing'] ?? true;
+                $defaultTime = $statuses['default']['minResponseTime'] ?? 9999;
+                $fallbackTime = $statuses['fallback']['minResponseTime'] ?? 0;
 
-        if (!$success) {
-            $processor = ($processor === 'default') ? 'fallback' : 'default';
+                if (!$isDefaultFailing && $defaultTime <= $fallbackTime * 3) {
+                    $processor = 'default';
+                }
+            }
+
+            $preciseTimestamp = microtime(true);
+
+            $body = [
+                'amount' => $amountInCents / 100,
+                'correlationId' => $correlationId,
+                'requestedAt' => DateTime::createFromFormat('U.u', sprintf('%.6f', $preciseTimestamp))
+                    ->format('Y-m-d\TH:i:s.v\Z'),
+            ];
+
             $success = sendPaymentRequest($paymentCurlHandle, $processor, $body);
+
+            if (!$success) {
+                $processor = ($processor === 'default') ? 'fallback' : 'default';
+                $success = sendPaymentRequest($paymentCurlHandle, $processor, $body);
+            }
+
+            if (!$success) {
+                $redis->lPush('payment_jobs', $job[1]);
+                continue;
+            }
+
+            $redis->set($correlationId, 1);
+
+            $redis->zAdd(
+                'payments:' . $processor,
+                $preciseTimestamp,
+                $correlationId . ':' . $amountInCents
+            );
+        } catch (\RedisException $e) {
+            $redis = new Redis();
+            $redis->pconnect('redis', 6379);
         }
 
-        if (!$success) {
-            $redis->lPush('payment_jobs', $job[1]);
-            continue;
+    }
+}
+
+function handle_shutdown_signal(int $signal)
+{
+    global $children;
+
+    foreach ($children as $pid) {
+        posix_kill($pid, SIGTERM);
+    }
+
+    while (pcntl_wait($status) > 0)
+        ;
+
+    exit(0);
+}
+
+pcntl_signal(SIGTERM, 'handle_shutdown_signal');
+pcntl_signal(SIGINT, 'handle_shutdown_signal');
+pcntl_signal(SIGHUP, 'handle_shutdown_signal');
+
+for ($i = 1; $i <= $numWorkers; $i++) {
+    $pid = pcntl_fork();
+
+    if ($pid === -1) {
+        die;
+    }
+
+    if ($pid) {
+        $children[$pid] = $pid;
+    } else {
+        run_worker_logic();
+        exit;
+    }
+}
+
+while (count($children) > 0) {
+    $exitedPid = pcntl_wait($status);
+
+    if ($exitedPid > 0) {
+        unset($children[$exitedPid]);
+
+        $newPid = pcntl_fork();
+
+        if ($newPid === -1) {
+            die;
         }
 
-        $redis->set($correlationId, 1);
-
-        $redis->zAdd(
-            'payments:' . $processor,
-            $preciseTimestamp,
-            $correlationId . ':' . $amountInCents
-        );
-
-    } catch (\RedisException $e) {
-        $redis = new Redis();
-        $redis->pconnect('redis', 6379);
+        if ($newPid) {
+            $children[$newPid] = $newPid;
+        } else {
+            run_worker_logic();
+            exit;
+        }
     }
 }
 

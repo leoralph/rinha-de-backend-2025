@@ -13,8 +13,8 @@ x-service-templates:
     deploy:
       resources:
         limits:
-          cpus: "0.3"
-          memory: "90M"
+          cpus: "0.245"
+          memory: "110M"
 
 services:
   nginx:
@@ -31,8 +31,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: "30M"
+          cpus: "0.12"
+          memory: "50M"
 
   redis:
     image: redis:latest
@@ -46,8 +46,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.2"
-          memory: "60M"
+          cpus: "0.28"
+          memory: "55M"
 
   payment-worker:
     build:
@@ -56,6 +56,7 @@ services:
     image: leoralph/rinha-de-backend-2025-worker
     environment:
       - WORKER_TYPE=payment
+      - WORKER_COUNT=10
     depends_on:
       redis:
         condition: service_healthy
@@ -65,8 +66,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "60M"
+          cpus: "0.6"
+          memory: "15M"
 
   health-worker:
     build:
@@ -84,8 +85,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.1"
-          memory: "20M"
+          cpus: "0.01"
+          memory: "10M"
 
   api01:
     <<: *api

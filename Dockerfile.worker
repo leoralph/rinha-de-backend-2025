@@ -4,7 +4,8 @@ WORKDIR /srv
 
 RUN apk add --no-cache autoconf build-base \
     && pecl install redis \
-    && docker-php-ext-enable redis
+    && docker-php-ext-enable redis \
+    && docker-php-ext-install pcntl
 
 COPY ./cmd/*-worker.php /srv
 
