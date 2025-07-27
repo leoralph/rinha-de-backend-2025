@@ -18,7 +18,7 @@ x-service-templates:
 
 services:
   nginx:
-    image: nginx:latest
+    image: nginx:alpine
     ports:
       - "9999:9999"
     volumes:
