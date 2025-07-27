@@ -7,15 +7,13 @@ $children = [];
 
 echo "[Gerente] Iniciando o gerenciador de workers ($numWorkers).\n";
 
-function sendPaymentRequest($ch, $processor, $body): bool
+function sendPaymentRequest($ch, $processor, $body): int
 {
     curl_setopt($ch, CURLOPT_URL, "http://payment-processor-{$processor}:8080/payments");
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
     curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    return $httpCode >= 200 && $httpCode < 300;
+    return curl_getinfo($ch, CURLINFO_HTTP_CODE);
 }
-
 
 function run_worker_logic()
 {
@@ -28,6 +26,8 @@ function run_worker_logic()
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+        CURLOPT_CONNECTTIMEOUT => 1,
+        CURLOPT_TIMEOUT => 3,
     ]);
 
     while (true) {
@@ -42,59 +42,55 @@ function run_worker_logic()
             $correlationId = $payload['correlationId'];
             $amountInCents = $payload['amountInCents'];
 
-            if ($redis->exists($correlationId)) {
-                continue;
-            }
-
             $statusJson = $redis->get('gateway-statuses');
             $statuses = $statusJson ? json_decode($statusJson, true) : null;
 
-            $processor = 'fallback';
+            $processor = 'default';
 
             if ($statuses) {
                 $isDefaultFailing = $statuses['default']['failing'] ?? true;
                 $defaultTime = $statuses['default']['minResponseTime'] ?? 9999;
                 $fallbackTime = $statuses['fallback']['minResponseTime'] ?? 0;
 
-                if (!$isDefaultFailing && $defaultTime <= $fallbackTime * 2) {
-                    $processor = 'default';
+                if ($isDefaultFailing || $defaultTime > $fallbackTime * 2) {
+                    $processor = 'fallback';
                 }
             }
 
-            $preciseTimestamp = microtime(true);
+            $now = new DateTime;
 
             $body = [
                 'amount' => $amountInCents / 100,
                 'correlationId' => $correlationId,
-                'requestedAt' => DateTime::createFromFormat('U.u', sprintf('%.6f', $preciseTimestamp))
-                    ->format('Y-m-d\TH:i:s.v\Z'),
+                'requestedAt' => $now->format('Y-m-d\TH:i:s.v\Z'),
             ];
 
-            $success = sendPaymentRequest($paymentCurlHandle, $processor, $body);
+            $httpCode = sendPaymentRequest($paymentCurlHandle, $processor, $body);
 
-            if (!$success) {
-                $processor = ($processor === 'default') ? 'fallback' : 'default';
-                $success = sendPaymentRequest($paymentCurlHandle, $processor, $body);
-            }
+            if ($httpCode >= 200 && $httpCode < 300) {
+                $redis->zAdd(
+                    'payments:' . $processor,
+                    (float) $now->format('U.v'),
+                    $correlationId . ':' . $amountInCents
+                );
 
-            if (!$success) {
-                $redis->lPush('payment_jobs', $job[1]);
                 continue;
             }
 
-            $redis->set($correlationId, 1);
+            if ($httpCode === 422) {
+                continue;
+            }
 
-            $redis->zAdd(
-                'payments:' . $processor,
-                $preciseTimestamp,
-                $correlationId . ':' . $amountInCents
-            );
+            $redis->lPush('payment_jobs', $job[1]);
+
         } catch (\RedisException $e) {
             $redis = new Redis();
             $redis->pconnect('redis', 6379);
         }
 
     }
+
+    curl_close($paymentCurlHandle);
 }
 
 function handle_shutdown_signal(int $signal)
@@ -150,5 +146,3 @@ while (count($children) > 0) {
         }
     }
 }
-
-curl_close($paymentCurlHandle);

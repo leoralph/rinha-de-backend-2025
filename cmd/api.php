@@ -20,40 +20,43 @@ LUA;
 
 $summaryScriptSha = $redis->script('load', $luaScript);
 
+function toFloatTimestamp(?string $dateString): ?float {
+    if (!$dateString) {
+        return null;
+    }
+
+    $date = new DateTime($dateString);
+
+    if (!$date) {
+        return null;
+    }
+
+    return (float) $date->format('U.v');
+}
 
 $routes = [
     'GET' => [
         '/payments-summary' => static function () use ($redis, $summaryScriptSha) {
-            $toFloatTimestamp = function (?string $dateString): ?float {
-                if (!$dateString) {
-                    return null;
-                }
-                $date = DateTime::createFromFormat('Y-m-d\TH:i:s.u\Z', $dateString) ?: DateTime::createFromFormat('Y-m-d\TH:i:s\Z', $dateString);
+            $from = toFloatTimestamp($_GET['from'] ?? null) ?? '-inf';
+            $to = toFloatTimestamp($_GET['to'] ?? null) ?? '+inf';
 
-                if (!$date) {
-                    return null;
-                }
+            $pipe = $redis->pipeline();
 
-                return (float) $date->format('U.u');
-            };
+            $pipe->evalSha($summaryScriptSha, ["payments:default", $from, $to], 1);
+            $pipe->evalSha($summaryScriptSha, ["payments:fallback", $from, $to], 1);
 
-            $from = $toFloatTimestamp($_GET['from'] ?? null) ?? '-inf';
-            $to = $toFloatTimestamp($_GET['to'] ?? null) ?? '+inf';
+            $results = $pipe->exec();
 
-            $summary = [];
-
-            foreach (['default', 'fallback'] as $processor) {
-                $cacheKey = "payments:{$processor}";
-
-                $result = $redis->evalSha($summaryScriptSha, [$cacheKey, $from, $to], 1);
-
-                $summary[$processor] = [
-                    'totalRequests' => (int) ($result[0] ?? 0),
-                    'totalAmount' => round(($result[1] ?? 0) / 100, 2)
-                ];
-            }
-
-            return $summary;
+            return [
+                'default' => [
+                    'totalRequests' => (int) ($results[0][0] ?? 0),
+                    'totalAmount' => ($results[0][1] ?? 0) / 100
+                ],
+                'fallback' => [
+                    'totalRequests' => (int) ($results[1][0] ?? 0),
+                    'totalAmount' => ($results[1][1] ?? 0) / 100
+                ]
+            ];
         },
     ],
     'POST' => [
