@@ -56,7 +56,7 @@ function run_worker_logic()
                 $defaultTime = $statuses['default']['minResponseTime'] ?? 9999;
                 $fallbackTime = $statuses['fallback']['minResponseTime'] ?? 0;
 
-                if (!$isDefaultFailing && $defaultTime <= $fallbackTime * 3) {
+                if (!$isDefaultFailing && $defaultTime <= $fallbackTime * 2) {
                     $processor = 'default';
                 }
             }
