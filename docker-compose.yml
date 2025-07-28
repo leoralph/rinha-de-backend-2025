@@ -4,8 +4,6 @@ x-service-templates:
       context: .
       dockerfile: Dockerfile.api
     image: leoralph/rinha-de-backend-2025-api
-    environment:
-      - WORKER_COUNT=40
     depends_on:
       redis:
         condition: service_healthy
@@ -58,7 +56,7 @@ services:
     image: leoralph/rinha-de-backend-2025-worker
     environment:
       - WORKER_TYPE=payment
-      - WORKER_COUNT=5
+      - WORKER_COUNT=3
     depends_on:
       redis:
         condition: service_healthy
