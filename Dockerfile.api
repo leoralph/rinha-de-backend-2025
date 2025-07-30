@@ -8,5 +8,5 @@ WORKDIR /srv
 
 COPY ./cmd/api.php /srv/public/index.php
 
-ENV FRANKENPHP_CONFIG="worker /srv/public/index.php 5"
+ENV FRANKENPHP_CONFIG="worker /srv/public/index.php 3"
 ENV SERVER_NAME=":80"
